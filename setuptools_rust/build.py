@@ -4,6 +4,7 @@ import os
 import platform
 import shutil
 import sys
+import sysconfig
 import subprocess
 from distutils.errors import (
     CompileError,
@@ -50,6 +51,7 @@ class build_rust(RustCommand):
         self.build_temp = None
         self.plat_name = None
         self.target = os.getenv("CARGO_BUILD_TARGET")
+        self.cargo = os.getenv("CARGO", "cargo")
 
     def finalize_options(self):
         super().finalize_options()
@@ -153,7 +155,7 @@ class build_rust(RustCommand):
 
         if executable:
             args = (
-                ["cargo", "build", "--manifest-path", ext.path]
+                [self.cargo, "build", "--manifest-path", ext.path]
                 + feature_args
                 + target_args
                 + list(ext.args or [])
@@ -169,7 +171,7 @@ class build_rust(RustCommand):
 
         else:
             args = (
-                ["cargo", "rustc", "--lib", "--manifest-path", ext.path]
+                [self.cargo, "rustc", "--lib", "--manifest-path", ext.path]
                 + feature_args
                 + target_args
                 + list(ext.args or [])
@@ -349,9 +351,41 @@ class build_rust(RustCommand):
         assert modpath not in build_ext.ext_map
         build_ext.ext_map[modpath] = ext
         try:
-            return build_ext.get_ext_fullpath(target_fname)
+            ext_path = build_ext.get_ext_fullpath(target_fname)
         finally:
             del build_ext.ext_map[modpath]
+
+        if '.abi3.' in ext_path:
+            return ext_path
+        # Examples: linux_x86_64, linux_i686, manylinux2014_aarch64, manylinux_2_24_armv7l
+        plat_name = self.plat_name.lower().replace('-', '_').replace('.', '_')
+        if not plat_name.startswith(('linux', 'manylinux')):
+            return ext_path
+
+        arch_parts = []
+        arch_found = False
+        for item in plat_name.split('_'):
+            if item.startswith(('linux', 'manylinux')):
+                continue
+            if item.isdigit() and not arch_found:
+                # manylinux_2_24_armv7l arch should be armv7l
+                continue
+            arch_found = True
+            arch_parts.append(item)
+        target_arch = '_'.join(arch_parts)
+        host_platform = sysconfig.get_platform()
+        host_arch = host_platform.rsplit('-', 1)[1]
+        # Remove incorrect platform tag if we are cross compiling
+        if target_arch and host_arch != target_arch:
+            ext_dir = os.path.dirname(ext_path)
+            ext_name = os.path.basename(ext_path)
+            # rust.cpython-38-x86_64-linux-gnu.so to (rust.cpython-38-x86_64-linux-gnu, .so)
+            ext_name, ext_ext = os.path.splitext(ext_name)
+            # rust.cpython-38-x86_64-linux-gnu to (rust, .cpython-38-x86_64-linux-gnu)
+            ext_name, _plat_tag = os.path.splitext(ext_name)
+            # rust.so, removed platform tag
+            ext_path = os.path.join(ext_dir, ext_name + ext_ext)
+        return ext_path
 
     @staticmethod
     def create_universal2_binary(output_path, input_paths):

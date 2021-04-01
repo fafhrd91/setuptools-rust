@@ -20,12 +20,14 @@ from .command import RustCommand
 from .extension import Binding, RustExtension, Strip
 from .utils import binding_features, get_rust_target_info, get_rust_target_list
 
+
 class _TargetInfo:
     def __init__(self, triple=None, cross_lib=None, linker=None, link_args=None):
         self.triple = triple
         self.cross_lib = cross_lib
         self.linker = linker
         self.link_args = link_args
+
 
 class build_rust(RustCommand):
     """ Command for building Rust crates via cargo. """
@@ -77,9 +79,7 @@ class build_rust(RustCommand):
         # we'll target a 32-bit Rust build.
         # Automatic target detection can be overridden via the CARGO_BUILD_TARGET
         # environment variable or --target command line option
-        if self.target:
-            return _TargetInfo(self.target)
-        elif self.plat_name == "win32":
+        if self.plat_name == "win32":
             return _TargetInfo("i686-pc-windows-msvc")
         elif self.plat_name == "win-amd64":
             return _TargetInfo("x86_64-pc-windows-msvc")
@@ -100,7 +100,7 @@ class build_rust(RustCommand):
 
         if not host_type or host_type == build_type:
             # not *NIX, or not cross compiling
-            return _TargetInfo()
+            return _TargetInfo(self.target)
 
         stdlib = sysconfig.get_path('stdlib')
         cross_lib = os.path.dirname(stdlib)
@@ -117,6 +117,7 @@ class build_rust(RustCommand):
         # hopefully an exact match
         targets = get_rust_target_list()
         if host_type in targets:
+            # FIXME: what if self.target != host_type
             return _TargetInfo(host_type, cross_lib, linker, linker_args)
 
         # the vendor field can be ignored, so x86_64-pc-linux-gnu is compatible
@@ -126,7 +127,11 @@ class build_rust(RustCommand):
             components[1] = 'unknown'
             host_type2 = '-'.join(components)
             if host_type2 in targets:
+                # FIXME: what if self.target != host_type2
                 return _TargetInfo(host_type2, cross_lib, linker, linker_args)
+
+        if self.target:
+            return _TargetInfo(self.target, cross_lib)
 
         raise DistutilsPlatformError(
                 "Don't know the correct rust target for system type %s. Please "
